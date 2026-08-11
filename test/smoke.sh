@@ -79,12 +79,17 @@ if [ "$OS" = "Linux" ]; then
     fi
 
     # The race guard: a --parent that is ALREADY wrong dies immediately.
+    # The wrong pid must NOT be 1: inside a container, busybox ash tail-call
+    # execs this script from `sh -c`, making THIS SHELL pid 1 — so 1 is the
+    # racer's real parent there and no mismatch exists (the alpine CI job
+    # caught exactly that). 999999 exceeds default pid_max niceties and is
+    # never our parent anywhere.
     # Probe by STATE + wait STATUS, not kill -0: a self-signaled racer is a
     # ZOMBIE until this shell reaps it, and kill -0 counts zombies as alive
     # (the exact sharp edge the README documents — and it bit this very test
     # under busybox ash in the alpine CI job). wait cannot be lied to, and
     # additionally proves the death was SIGKILL (rc 137 = 128+9).
-    "$BOSUN" --pdeathsig KILL --parent 1 -- sleep 300 &
+    "$BOSUN" --pdeathsig KILL --parent 999999 -- sleep 300 &
     RACER=$!
     sleep 1
     RSTAT=$(ps -o stat= -p "$RACER" 2>/dev/null | tr -d ' ')
