@@ -21,9 +21,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: mlugg/setup-zig@v2
-        with:
-          version: ${{ env.ZIG_VERSION }}
+      - run: .github/install-zig.sh   # pinned + sha256-verified from ziglang.org
       - run: zig build test
       - run: zig build --release && ./test/smoke.sh   # never tag-ship untested
       - run: zig build release --release

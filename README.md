@@ -84,15 +84,15 @@ hard requirement for captAInHook's content-identity rendezvous).
 
 ```sh
 V=v0.1.0; T=x86_64-linux
-curl -fsSLO https://github.com/OWNER/bosun/releases/download/$V/bosun-$T
-curl -fsSLO https://github.com/OWNER/bosun/releases/download/$V/SHA256SUMS
+curl -fsSLO https://github.com/LoganBresnahan/bosun/releases/download/$V/bosun-$T
+curl -fsSLO https://github.com/LoganBresnahan/bosun/releases/download/$V/SHA256SUMS
 grep "bosun-$T\$" SHA256SUMS | sha256sum -c -
 install -m 0755 bosun-$T /your/deploy/dir/bosun
 ```
 
 ## Consumers
 
-- **[captAInHook](https://github.com/OWNER/captAInHook)** — replaces the
+- **[captAInHook](https://github.com/LoganBresnahan/captAInHook)** — replaces the
   `setsid(1)` PATH probe in its exec-handler spawn path; co-located in the
   deploy dir beside the engine and shim (native ⇒ no MVID ⇒ invisible to the
   content-identity hash by the same rule as the AOT shim).
@@ -113,4 +113,4 @@ install -m 0755 bosun-$T /your/deploy/dir/bosun
 
 ## License
 
-Apache-2.0.
+MIT.
