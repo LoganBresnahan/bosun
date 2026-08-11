@@ -1,0 +1,39 @@
+name: release
+
+# Tag vX.Y.Z -> build all targets from ONE Linux host, checksum, publish as
+# release assets. Consumers (captAInHook /deploy, pharos release CI) fetch a
+# PINNED tag and verify SHA256SUMS — never "latest": a silently updated binary
+# would change consumer deploy bytes behind an unchanged source tree, which
+# breaks captAInHook's build-determinism invariant.
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+env:
+  ZIG_VERSION: 0.15.2
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: ${{ env.ZIG_VERSION }}
+      - run: zig build test
+      - run: zig build --release && ./test/smoke.sh   # never tag-ship untested
+      - run: zig build release --release
+      - name: checksums
+        working-directory: zig-out/release
+        run: sha256sum bosun-* > SHA256SUMS
+      - name: publish
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            zig-out/release/bosun-*
+            zig-out/release/SHA256SUMS
+          generate_release_notes: true
