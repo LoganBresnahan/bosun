@@ -58,6 +58,10 @@ pub fn build(b: *std.Build) void {
             .optimize = optimize,
         }),
     });
+    // Same libc posture as the shipped binary. Without this, the native test
+    // link on newer macOS SDKs fails with `undefined symbol:
+    // __availability_version_check` (seen on the macos-latest arm64 runner).
+    tests.linkLibC();
     const run_tests = b.addRunArtifact(tests);
     b.step("test", "Run unit tests").dependOn(&run_tests.step);
 }

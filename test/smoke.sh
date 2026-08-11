@@ -79,15 +79,28 @@ if [ "$OS" = "Linux" ]; then
     fi
 
     # The race guard: a --parent that is ALREADY wrong dies immediately.
+    # Probe by STATE + wait STATUS, not kill -0: a self-signaled racer is a
+    # ZOMBIE until this shell reaps it, and kill -0 counts zombies as alive
+    # (the exact sharp edge the README documents — and it bit this very test
+    # under busybox ash in the alpine CI job). wait cannot be lied to, and
+    # additionally proves the death was SIGKILL (rc 137 = 128+9).
     "$BOSUN" --pdeathsig KILL --parent 1 -- sleep 300 &
     RACER=$!
     sleep 1
-    if kill -0 "$RACER" 2>/dev/null; then
-        fail "pdeathsig: --parent mismatch did not self-signal"
-        kill -KILL "$RACER" 2>/dev/null
-    else
-        pass "pdeathsig: --parent mismatch self-signals (fork-to-prctl race closed)"
-    fi
+    RSTAT=$(ps -o stat= -p "$RACER" 2>/dev/null | tr -d ' ')
+    case "$RSTAT" in
+        ""|Z*)
+            wait "$RACER" 2>/dev/null
+            RC=$?
+            [ "$RC" -eq 137 ] \
+                && pass "pdeathsig: --parent mismatch self-signals with KILL (wait rc=137)" \
+                || fail "pdeathsig: racer died with rc=$RC, want 137"
+            ;;
+        *)
+            fail "pdeathsig: --parent mismatch did not self-signal (stat=$RSTAT)"
+            kill -KILL "$RACER" 2>/dev/null
+            ;;
+    esac
 else
     # macOS: the HARD flag must refuse loudly; the SOFT flag must degrade.
     "$BOSUN" --pdeathsig KILL -- true 2>/dev/null
