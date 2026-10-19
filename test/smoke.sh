@@ -11,10 +11,13 @@
 #   3. exit codes : 127 command-not-found, 125 flag errors, exec passthrough.
 #   4. no-setsid  : opt-out leaves the child in the caller's group.
 #
-# Usage: test/smoke.sh [path-to-bosun]   (default: zig-out/bin/bosun)
+#   5. sigpipe    : (Linux) the payload inherits the CALLER's SIGPIPE disposition,
+#                   not the ignored one Rust's runtime sets for itself.
+#
+# Usage: test/smoke.sh [path-to-bosun]   (default: target/release/bosun)
 
 set -u
-BOSUN="${1:-zig-out/bin/bosun}"
+BOSUN="${1:-target/release/bosun}"
 FAILS=0
 OS="$(uname -s)"
 
@@ -138,6 +141,16 @@ else
     fail "--no-setsid: child unexpectedly leads its own group"
 fi
 kill "$NS" 2>/dev/null; wait "$NS" 2>/dev/null
+
+# ── 5. SIGPIPE disposition passes through untouched (Linux: /proc) ──────────
+if [ "$OS" = "Linux" ]; then
+    BASE=$(grep SigIgn /proc/self/status | awk '{print $2}')
+    VIA=$("$BOSUN" --no-setsid -- grep SigIgn /proc/self/status | awk '{print $2}')
+    B=$(( 0x$BASE & 0x1000 )); V=$(( 0x$VIA & 0x1000 ))   # bit 13 = SIGPIPE
+    [ "$B" -eq "$V" ] \
+        && pass "sigpipe: payload's SIGPIPE disposition matches the caller's" \
+        || fail "sigpipe: caller SigIgn=$BASE, payload SigIgn=$VIA"
+fi
 
 say ""
 if [ "$FAILS" -eq 0 ]; then say "smoke: all green"; exit 0

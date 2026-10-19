@@ -2,51 +2,17 @@ name: ci
 
 on:
   push:
-    branches: [main]
+    branches: [main, "ci/**"]
   pull_request:
+  workflow_dispatch:
 
-env:
-  ZIG_VERSION: 0.15.2
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
 
 jobs:
-  # Behavior is the contract, so the smoke suite runs against a REAL kernel on
-  # every OS we ship for. Linux additionally proves pdeathsig; macOS
-  # additionally proves the loud-refusal path. Container job proves the musl
-  # static binary works where nothing is installed (the minimal-image story).
-  test:
-    strategy:
-      fail-fast: false
-      matrix:
-        # Runners are PINNED like everything else here: macos-latest drifted
-        # to macos-26-arm64, whose SDK zig 0.15.2 cannot yet link against
-        # (undefined libSystem symbols). Revisit the pin when bumping Zig.
-        os: [ubuntu-latest, ubuntu-24.04-arm, macos-15, macos-15-intel]
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@v4
-      - run: .github/install-zig.sh   # pinned + sha256-verified from ziglang.org
-      - run: zig build test
-      - run: zig build --release
-      - run: ./test/smoke.sh
-
-  # The 28KB musl binary must run in a container with NOTHING else in it.
-  test-container:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - run: .github/install-zig.sh   # pinned + sha256-verified from ziglang.org
-      - run: zig build release --release
-      - name: smoke inside alpine
-        run: |
-          docker run --rm -v "$PWD:/w" -w /w alpine:3 \
-            sh -c 'apk add -q procps && ./test/smoke.sh zig-out/release/bosun-x86_64-linux'
-
-  # Every release target must CROSS-COMPILE from one Linux host — that this is
-  # possible is half the reason the tool is written in Zig.
-  cross:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - run: .github/install-zig.sh   # pinned + sha256-verified from ziglang.org
-      - run: zig build release --release
-      - run: ls -la zig-out/release/
+  build:
+    uses: ./.github/workflows/build.yml

@@ -1,0 +1,28 @@
+[package]
+name = "bosun"
+version = "0.2.0"
+edition = "2021"
+rust-version = "1.94"
+description = "Process-attribute launcher: setsid + PR_SET_PDEATHSIG + exec, the lines managed runtimes cannot reach between fork and exec"
+license = "MIT"
+repository = "https://github.com/LoganBresnahan/bosun"
+
+[lib]
+name = "bosun"
+path = "src/lib.rs"
+
+[[bin]]
+name = "bosun"
+path = "src/main.rs"
+
+[dependencies]
+libc = "0.2"
+
+# The binary is exec'd over within microseconds; size and start-up matter more
+# than anything else, and a panic must never unwind into a half-applied state.
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

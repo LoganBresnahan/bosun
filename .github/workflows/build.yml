@@ -1,0 +1,83 @@
+# Build, test and smoke one binary per target, each NATIVELY on its own
+# runner, and smoke the exact bytes that ship. (bosun v0.1.0 cross-compiled
+# every target from one Linux host while CI tested native builds; the shipped
+# x86_64-macos bytes were never run, and they segfaulted on Intel Macs.)
+name: build
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { runner: ubuntu-22.04,     rust: x86_64-unknown-linux-musl,  asset: bosun-x86_64-linux }
+          - { runner: ubuntu-22.04-arm, rust: aarch64-unknown-linux-musl, asset: bosun-aarch64-linux }
+          - { runner: macos-14,         rust: aarch64-apple-darwin,       asset: bosun-aarch64-macos }
+          - { runner: macos-15-intel,   rust: x86_64-apple-darwin,        asset: bosun-x86_64-macos }
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash   # -e -o pipefail: a failing command fails the step
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchain (rust-toolchain.toml) and target
+        run: |
+          rustup show active-toolchain || rustup toolchain install
+          rustup target add ${{ matrix.rust }}
+          if [ "$RUNNER_OS" = Linux ]; then sudo apt-get update -q && sudo apt-get install -yq musl-tools; fi
+
+      - name: Lint and unit tests
+        run: |
+          cargo fmt --check
+          cargo clippy --all-targets -- -D warnings
+          cargo test
+
+      - name: Build the release binary
+        run: |
+          cargo build --release --locked --target ${{ matrix.rust }}
+          mkdir -p dist
+          cp target/${{ matrix.rust }}/release/bosun dist/${{ matrix.asset }}
+          chmod 0755 dist/${{ matrix.asset }}
+
+      # arm64 Mach-O must carry a valid signature; re-sign ad hoc after any
+      # strip so the shipped bytes are the signed ones.
+      - name: Sign (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          codesign -s - -f dist/${{ matrix.asset }}
+          codesign -v dist/${{ matrix.asset }}
+
+      - name: What we ship
+        run: |
+          file dist/${{ matrix.asset }}
+          ls -l dist/${{ matrix.asset }}
+          if [ "$RUNNER_OS" = Linux ]; then
+            # musl static: nothing dynamic may be required
+            if ldd dist/${{ matrix.asset }} 2>&1 | grep -q '=>'; then echo "not static" >&2; exit 1; fi
+          else
+            otool -L dist/${{ matrix.asset }}
+          fi
+
+      - name: Smoke the shipped bytes
+        run: ./test/smoke.sh dist/${{ matrix.asset }}
+
+      # The musl binary must run where NOTHING else is installed.
+      - name: Smoke inside alpine (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          docker run --rm -v "$PWD:/w" -w /w alpine:3 \
+            sh -c 'apk add -q procps && ./test/smoke.sh dist/${{ matrix.asset }}'
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset }}
+          path: dist/${{ matrix.asset }}
+          if-no-files-found: error

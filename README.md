@@ -64,15 +64,29 @@ Follows `env(1)`/`nohup(1)` conventions:
 
 ## Building
 
-Zig 0.15+. Linux binaries are **musl-static** (28 KB; run in `FROM scratch`);
-macOS binaries link libSystem. Every target cross-compiles from any host:
+Rust (pinned in `rust-toolchain.toml`), `libc` as the only dependency. Linux
+binaries are **musl-static** (run in `FROM scratch`); macOS binaries link
+libSystem and are ad-hoc signed.
 
 ```sh
-zig build test              # unit tests
-zig build --release         # host binary -> zig-out/bin/bosun
-./test/smoke.sh             # behavioral contract against the real kernel
-zig build release --release # all targets -> zig-out/release/bosun-<arch>-<os>
+cargo test                       # unit tests (flag + signal parsing)
+cargo build --release            # host binary -> target/release/bosun
+./test/smoke.sh                  # behavioral contract against the real kernel
 ```
+
+Every release target is built **natively on its own CI runner** and the smoke
+suite runs against **the exact bytes that ship** (Linux also inside a bare
+alpine container). v0.1.0 was Zig, cross-compiled from one Linux host while CI
+smoke-tested separate native builds; its shipped binaries were never executed in
+CI (captAInHook's Intel Mac payloads then crashed under the shipped
+`x86_64-macos` one). v0.2.0 is the Rust port with
+the same flags, exit codes and refusals, and it fixes one more cross-platform
+bug: `USR1`/`USR2` now resolve to the platform's own numbers (they were the
+Linux values everywhere).
+
+The crate is also a library: `bosun::run(args)` is the whole tool, so another
+native front end can offer it as a subcommand without shipping a second
+binary.
 
 ## Distribution & pinning
 
@@ -83,7 +97,7 @@ unchanged source tree, which breaks reproducible-deploy schemes (this is a
 hard requirement for captAInHook's content-identity rendezvous).
 
 ```sh
-V=v0.1.0; T=x86_64-linux
+V=v0.2.0; T=x86_64-linux
 curl -fsSLO https://github.com/LoganBresnahan/bosun/releases/download/$V/bosun-$T
 curl -fsSLO https://github.com/LoganBresnahan/bosun/releases/download/$V/SHA256SUMS
 grep "bosun-$T\$" SHA256SUMS | sha256sum -c -
@@ -96,11 +110,11 @@ install -m 0755 bosun-$T /your/deploy/dir/bosun
   `setsid(1)` PATH probe in its exec-handler spawn path; co-located in the
   deploy dir beside the engine and shim (native ⇒ no MVID ⇒ invisible to the
   content-identity hash by the same rule as the AOT shim).
-- **pharos-mcp** *(prospective)* — LSP children spawned under
-  `bosun --pdeathsig KILL --parent <pid>` are kernel-reaped when pharos dies,
-  eliminating orphaned language servers on Linux with no cleanup pass (the
-  `PR_SET_PDEATHSIG` item its ADR-030 deferred). No NIF involved — bosun is an
-  executable, spawned like any port program.
+- **pharos-mcp**: not for `setsid`. The BEAM's `erl_child_setup` already makes
+  every port child a session leader, so bosun's default would fail with 125
+  (pharos ADR-031). `--pdeathsig KILL --no-setsid` for language servers under
+  the shared daemon is the open question there, linked as the library into
+  pharos's Rust shim.
 
 ## Non-goals
 

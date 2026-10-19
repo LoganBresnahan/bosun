@@ -1,37 +1,46 @@
+# Tag vX.Y.Z -> build and smoke every target natively (build.yml), then publish
+# those exact bytes plus SHA256SUMS. Consumers (captAInHook's package.sh, pharos)
+# pin a TAG and verify digests they keep in their own repo, never "latest": a
+# silently updated binary would change consumer deploy bytes behind an
+# unchanged source tree.
 name: release
-
-# Tag vX.Y.Z -> build all targets from ONE Linux host, checksum, publish as
-# release assets. Consumers (captAInHook /deploy, pharos release CI) fetch a
-# PINNED tag and verify SHA256SUMS — never "latest": a silently updated binary
-# would change consumer deploy bytes behind an unchanged source tree, which
-# breaks captAInHook's build-determinism invariant.
 
 on:
   push:
     tags: ["v*"]
 
 permissions:
-  contents: write
-
-env:
-  ZIG_VERSION: 0.15.2
+  contents: read
 
 jobs:
-  release:
-    runs-on: ubuntu-latest
+  build:
+    uses: ./.github/workflows/build.yml
+
+  publish:
+    needs: build
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@v4
-      - run: .github/install-zig.sh   # pinned + sha256-verified from ziglang.org
-      - run: zig build test
-      - run: zig build --release && ./test/smoke.sh   # never tag-ship untested
-      - run: zig build release --release
-      - name: checksums
-        working-directory: zig-out/release
-        run: sha256sum bosun-* > SHA256SUMS
-      - name: publish
-        uses: softprops/action-gh-release@v2
+      - name: Cargo version matches the tag
+        run: |
+          v=$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -1)
+          [ "v$v" = "$GITHUB_REF_NAME" ] || { echo "tag $GITHUB_REF_NAME != Cargo.toml $v" >&2; exit 1; }
+      - uses: actions/download-artifact@v4
         with:
-          files: |
-            zig-out/release/bosun-*
-            zig-out/release/SHA256SUMS
-          generate_release_notes: true
+          path: built
+      - name: Gather and checksum
+        run: |
+          mkdir dist
+          cp built/*/bosun-* dist/
+          (cd dist && sha256sum bosun-* > SHA256SUMS && cat SHA256SUMS)
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" \
+            --title "bosun ${GITHUB_REF_NAME#v}" --generate-notes
