@@ -1,7 +1,10 @@
 # Build, test and smoke one binary per target, each NATIVELY on its own
 # runner, and smoke the exact bytes that ship. (bosun v0.1.0 cross-compiled
-# every target from one Linux host while CI tested native builds; the shipped
-# x86_64-macos bytes were never run, and they segfaulted on Intel Macs.)
+# every target from one Linux host while CI tested native builds, so the
+# shipped bytes were never run. The shipped x86_64-macos binary then segfaulted
+# whenever captAInHook's .NET engine spawned it on Intel Macs, though it ran
+# from a plain shell; this smoke runs from a shell, so a consumer's own smoke
+# under its real parent stays the acceptance test.)
 name: build
 
 on:
