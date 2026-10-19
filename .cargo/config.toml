@@ -1,0 +1,6 @@
+# aarch64 musl: compiler_builtins' LSE-atomics and CPU-feature init call
+# getauxval, and the static link puts musl's libc.a (-lc) before
+# compiler_builtins, so the reference goes unresolved. A trailing -lc lets the
+# linker resolve it. x86_64 musl does not need this.
+[target.aarch64-unknown-linux-musl]
+rustflags = ["-C", "link-arg=-lc"]
