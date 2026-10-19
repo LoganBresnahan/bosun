@@ -32,11 +32,9 @@
 //! offer the same behaviour as a subcommand without shipping a second binary:
 //! hand [`run`] the arguments that follow the subcommand.
 
-use std::ffi::{OsStr, OsString};
+use std::ffi::{CString, OsStr, OsString};
 use std::io;
 use std::os::unix::ffi::OsStrExt;
-use std::os::unix::process::CommandExt;
-use std::process::Command;
 
 pub const USAGE: &str = "usage: bosun [--pdeathsig <SIG>] [--pdeathsig-soft <SIG>] [--parent <pid>]\n             [--no-setsid] -- <command> [args...]\n";
 
@@ -202,11 +200,30 @@ fn apply_death_signal(
 
 /// Exec `command` in place (PATH search, same pid). Returns only on failure,
 /// with bosun's exit code for it: 127 not found, 126 anything else.
+///
+/// bosun changes nothing it was not asked to: execvp(3) directly, not
+/// `std::process::Command`, which resets SIGPIPE to its default and clears the
+/// signal mask on the way. The payload inherits the caller's dispositions and
+/// mask exactly. The `bosun` binary also skips Rust's runtime start-up (which
+/// would ignore SIGPIPE before `main`); a library caller whose own runtime
+/// changed SIGPIPE restores what it wants before calling [`run`].
 pub fn exec(command: &[OsString]) -> (i32, io::Error) {
-    // std resets SIGPIPE to its default and clears the signal mask before
-    // exec, so the payload does not inherit Rust's ignored SIGPIPE.
-    let err = Command::new(&command[0]).args(&command[1..]).exec();
-    let code = if err.kind() == io::ErrorKind::NotFound {
+    let cargs: Result<Vec<CString>, _> =
+        command.iter().map(|a| CString::new(a.as_bytes())).collect();
+    let cargs = match cargs {
+        Ok(c) => c,
+        Err(_) => {
+            return (
+                126,
+                io::Error::new(io::ErrorKind::InvalidInput, "argument contains a NUL byte"),
+            )
+        }
+    };
+    let mut ptrs: Vec<*const libc::c_char> = cargs.iter().map(|c| c.as_ptr()).collect();
+    ptrs.push(std::ptr::null());
+    unsafe { libc::execvp(ptrs[0], ptrs.as_ptr()) };
+    let err = io::Error::last_os_error();
+    let code = if err.raw_os_error() == Some(libc::ENOENT) {
         127
     } else {
         126

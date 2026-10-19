@@ -11,8 +11,8 @@
 #   3. exit codes : 127 command-not-found, 125 flag errors, exec passthrough.
 #   4. no-setsid  : opt-out leaves the child in the caller's group.
 #
-#   5. sigpipe    : (Linux) the payload inherits the CALLER's SIGPIPE disposition,
-#                   not the ignored one Rust's runtime sets for itself.
+#   5. signals    : (Linux) the payload inherits the CALLER's ignored set and
+#                   blocked mask exactly; bosun changes nothing it wasn't asked to.
 #
 # Usage: test/smoke.sh [path-to-bosun]   (default: target/release/bosun)
 
@@ -144,12 +144,20 @@ kill "$NS" 2>/dev/null; wait "$NS" 2>/dev/null
 
 # ── 5. SIGPIPE disposition passes through untouched (Linux: /proc) ──────────
 if [ "$OS" = "Linux" ]; then
-    BASE=$(grep SigIgn /proc/self/status | awk '{print $2}')
-    VIA=$("$BOSUN" --no-setsid -- grep SigIgn /proc/self/status | awk '{print $2}')
-    B=$(( 0x$BASE & 0x1000 )); V=$(( 0x$VIA & 0x1000 ))   # bit 13 = SIGPIPE
-    [ "$B" -eq "$V" ] \
-        && pass "sigpipe: payload's SIGPIPE disposition matches the caller's" \
-        || fail "sigpipe: caller SigIgn=$BASE, payload SigIgn=$VIA"
+    # The caller's ignored set and blocked mask must reach the payload
+    # unchanged, whatever they are (CI runners ignore SIGPIPE; shells don't).
+    for f in SigIgn SigBlk; do
+        BASE=$(grep "^$f" /proc/self/status | awk '{print $2}')
+        VIA=$("$BOSUN" --no-setsid -- grep "^$f" /proc/self/status | awk '{print $2}')
+        [ "$BASE" = "$VIA" ] \
+            && pass "signals: payload's $f matches the caller's ($BASE)" \
+            || fail "signals: caller $f=$BASE, payload $f=$VIA"
+    done
+    # And the same under a caller that DOES ignore SIGPIPE.
+    IGN=$(sh -c 'trap "" PIPE; exec "$0" --no-setsid -- grep "^SigIgn" /proc/self/status' "$BOSUN" | awk '{print $2}')
+    [ $(( 0x$IGN & 0x1000 )) -ne 0 ] \
+        && pass "signals: an ignored SIGPIPE stays ignored across bosun" \
+        || fail "signals: SIGPIPE ignored by the caller was reset (SigIgn=$IGN)"
 fi
 
 say ""
