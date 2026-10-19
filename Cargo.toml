@@ -14,6 +14,9 @@ path = "src/lib.rs"
 [[bin]]
 name = "bosun"
 path = "src/main.rs"
+# no_main: the C entry point is bosun itself, so a test harness built from this
+# target would run bosun with the harness's arguments. The tests live in the lib.
+test = false
 
 [dependencies]
 libc = "0.2"
